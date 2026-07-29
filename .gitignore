@@ -1,0 +1,5 @@
+.venv/
+__pycache__/
+*.pyc
+data/geocode_cache.json
+data/clienti.json
