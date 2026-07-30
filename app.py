@@ -109,24 +109,51 @@ _MANUAL_FIELD_KEYS = [
     "manual_cliente", "manual_indirizzo", "manual_cap",
     "manual_citta", "manual_provincia", "manual_vincolo",
 ]
+_NUOVO_CLIENTE_LABEL = "➕ Nuovo cliente..."
+
+# Streamlit vieta di riassegnare st.session_state[key] per un widget DOPO che
+# quel widget e' gia' stato istanziato nello stesso run. Per svuotare i campi
+# dopo l'invio, usiamo un flag controllato PRIMA che i widget vengano creati.
+if st.session_state.get("_reset_manual_form"):
+    for _k in _MANUAL_FIELD_KEYS:
+        st.session_state[_k] = ""
+    st.session_state["manual_client_select"] = _NUOVO_CLIENTE_LABEL
+    st.session_state["_reset_manual_form"] = False
+
 for _k in _MANUAL_FIELD_KEYS:
     st.session_state.setdefault(_k, "")
 
+
+def _autofill_from_saved_client():
+    """Callback della tendina 'Cliente salvato': eseguito PRIMA del rerun,
+    quindi puo' impostare in sicurezza i campi degli altri widget."""
+    selected = st.session_state.get("manual_client_select")
+    if not selected or selected == _NUOVO_CLIENTE_LABEL:
+        return
+    match = clients_db.find_client(selected)
+    if match:
+        st.session_state.manual_cliente = match["cliente"]
+        st.session_state.manual_indirizzo = match["indirizzo"]
+        st.session_state.manual_cap = match["cap"]
+        st.session_state.manual_citta = match["citta"]
+        st.session_state.manual_provincia = match["provincia"]
+        st.session_state.manual_vincolo = match.get("vincolo", "")
+
+
 with st.expander("➕ Aggiungi una tappa manualmente (senza DDT)"):
+    saved_names = [c["cliente"] for c in clients_db.list_clients()]
+    st.selectbox(
+        "Cliente salvato in anagrafica (opzionale)",
+        [_NUOVO_CLIENTE_LABEL] + saved_names,
+        key="manual_client_select",
+        on_change=_autofill_from_saved_client,
+        help="Scegli un cliente gia' salvato per compilare da solo indirizzo e priorita', "
+             "oppure lascia 'Nuovo cliente' e scrivi i dati a mano.",
+    )
+
     c1, c2 = st.columns(2)
     with c1:
         st.text_input("Cliente", key="manual_cliente")
-        if st.button("🔍 Cerca in anagrafica clienti"):
-            match = clients_db.find_client(st.session_state.manual_cliente)
-            if match:
-                st.session_state.manual_indirizzo = match["indirizzo"]
-                st.session_state.manual_cap = match["cap"]
-                st.session_state.manual_citta = match["citta"]
-                st.session_state.manual_provincia = match["provincia"]
-                st.session_state.manual_vincolo = match.get("vincolo", "")
-                st.success(f"Trovato in anagrafica: {match['cliente']}")
-            else:
-                st.warning("Nessun cliente salvato con questo nome.")
         st.text_input("Indirizzo", key="manual_indirizzo")
         st.text_input("CAP", key="manual_cap")
     with c2:
@@ -165,8 +192,7 @@ with st.expander("➕ Aggiungi una tappa manualmente (senza DDT)"):
                     st.session_state.manual_provincia, st.session_state.manual_vincolo,
                 )
             st.success(f"Tappa '{st.session_state.manual_cliente}' aggiunta alla tabella qui sotto.")
-            for _k in _MANUAL_FIELD_KEYS:
-                st.session_state[_k] = ""
+            st.session_state["_reset_manual_form"] = True
             st.rerun()
 
 with st.expander("🗂️ Anagrafica clienti salvati"):
