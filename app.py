@@ -269,11 +269,15 @@ def calcola_giro():
         stops = []
         geocode_errors = []
         for _, row in df.iterrows():
-            full_addr = f"{row.get('Indirizzo', '')}, {row.get('CAP', '')} {row.get('Citta', '')} ({row.get('Provincia', '')})"
-            lat, lon, display_name = geocode.geocode_address(full_addr)
+            indirizzo = row.get("Indirizzo", "")
+            cap = row.get("CAP", "")
+            citta = row.get("Citta", "")
+            provincia = row.get("Provincia", "")
+            lat, lon, display_name = geocode.geocode_stop(indirizzo, cap, citta, provincia)
             if lat is None:
                 geocode_errors.append(row.get("Cliente", "?"))
                 continue
+            full_addr = f"{indirizzo}, {cap} {citta} ({provincia})"
             stops.append({
                 "cliente": row.get("Cliente", ""),
                 "indirizzo_completo": display_name or full_addr,
