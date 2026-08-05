@@ -11,6 +11,7 @@ import streamlit as st
 from src import clients_db, config, distance_matrix, geocode, maps_links, ocr_extract, optimizer
 
 st.set_page_config(page_title="DNP Pharma - Pianificatore Giri", layout="wide")
+st.logo("assets/logo_dnp_pharma.png")
 
 STOPS_COLUMNS = [
     "Cliente", "Indirizzo", "CAP", "Citta", "Provincia", "Vincolo",
@@ -51,8 +52,12 @@ def _geocode_depot():
     return st.session_state.depot_coord
 
 
-st.title("🚚 DNP Pharma — Pianificatore Giri di Consegna")
-st.caption(f"Deposito: {config.DEPOT_ADDRESS}")
+col_logo, col_title = st.columns([1, 4])
+with col_logo:
+    st.image("assets/logo_dnp_pharma.png")
+with col_title:
+    st.title("🚚 Pianificatore Giri di Consegna")
+    st.caption(f"Deposito: {config.DEPOT_ADDRESS}")
 
 def _time_range_15min(t_min, t_max):
     """Lista di orari (datetime.time) a passi di 15 minuti tra t_min e t_max inclusi."""
