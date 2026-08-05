@@ -426,6 +426,7 @@ def calcola_giro():
 
         stops = []
         geocode_errors = []
+        precisione_bassa = []  # clienti dove l'app NON ha trovato la via esatta
         for _, row in df.iterrows():
             indirizzo = row.get("Indirizzo", "")
             cap = row.get("CAP", "")
@@ -440,12 +441,21 @@ def calcola_giro():
                 # esatto che si vede su Google Maps.
                 lat, lon = coord_override
                 display_name = f"{full_addr} [coordinate GPS manuali]"
+                precisione = "manuale"
             else:
-                lat, lon, display_name = geocode.geocode_stop(indirizzo, cap, citta, provincia)
+                lat, lon, display_name, precisione = geocode.geocode_stop(indirizzo, cap, citta, provincia)
 
             if lat is None:
                 geocode_errors.append(row.get("Cliente", "?"))
                 continue
+
+            if precisione == "bassa":
+                # L'app NON ha trovato la via/il civico: si e' dovuta accontentare del
+                # centro citta' (o del solo CAP). Non e' un indirizzo inventato a caso,
+                # ma NON e' il punto preciso — va segnalato chiaramente, non nascosto,
+                # esattamente come fanno i siti dei corrieri quando non riconoscono
+                # un indirizzo.
+                precisione_bassa.append(row.get("Cliente", "?"))
 
             tempo_scarico_raw = row.get("Tempo Scarico (min)", "")
             try:
@@ -460,12 +470,20 @@ def calcola_giro():
                 "lat": lat,
                 "lon": lon,
                 "tempo_scarico": tempo_scarico,
+                "precisione": precisione,
             })
 
         if geocode_errors:
             st.warning(
                 "Indirizzo non geocodificabile per: " + ", ".join(geocode_errors) +
                 ". Verifica/correggi l'indirizzo nella tabella."
+            )
+        if precisione_bassa:
+            st.error(
+                "⚠️ Via/civico NON trovati con precisione per: " + ", ".join(precisione_bassa) +
+                ". L'app ha posizionato questi punti solo indicativamente (centro città/CAP), "
+                "NON sull'indirizzo esatto — usa '🔍 Cerca e conferma un indirizzo' qui sopra o "
+                "incolla le coordinate GPS da Google Maps prima di fidarti del percorso."
             )
         if not stops:
             st.error("Nessun indirizzo valido da pianificare.")

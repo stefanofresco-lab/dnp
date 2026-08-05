@@ -19,6 +19,10 @@ _geocode_raw = RateLimiter(_geolocator.geocode, min_delay_seconds=1.1, max_retri
 _geocode_multi_raw = RateLimiter(_geolocator.geocode, min_delay_seconds=1.1, max_retries=1)
 
 _CIVICO_RE = re.compile(r"\s*,?\s*\d+\s*\w{0,3}\s*$")
+# Abbreviazioni puntate tipo "G." in "Via G. Carducci": Nominatim spesso non le
+# riconosce affatto (zero risultati), mentre senza l'iniziale puntata trova
+# correttamente la via.
+_ABBREV_RE = re.compile(r"\b[A-Za-zÀ-ÖØ-öø-ÿ]\.\s+")
 
 
 def _load_cache():
@@ -72,8 +76,10 @@ def geocode_address(address: str):
 def geocode_stop(indirizzo: str, cap: str, citta: str, provincia: str = ""):
     """Geocodifica una tappa a partire dai campi separati, tentando piu'
     varianti via via piu' generiche se le prime falliscono. Ritorna
-    (lat, lon, display_name) oppure (None, None, None) se nessuna variante
-    trova un risultato."""
+    (lat, lon, display_name, precisione) — precisione e' "alta" (via+civico
+    trovati), "media" (via senza civico) o "bassa" (solo CAP/citta', quindi il
+    punto e' solo indicativo, non l'indirizzo preciso). Ritorna
+    (None, None, None, None) se nessuna variante trova un risultato."""
     indirizzo = (indirizzo or "").strip()
     cap = (cap or "").strip()
     citta = (citta or "").strip()
@@ -82,12 +88,13 @@ def geocode_stop(indirizzo: str, cap: str, citta: str, provincia: str = ""):
     cache_key = f"{indirizzo}|{cap}|{citta}|{provincia}".strip().lower()
     if cache_key in _CACHE:
         entry = _CACHE[cache_key]
-        return entry["lat"], entry["lon"], entry["display_name"]
+        return entry["lat"], entry["lon"], entry["display_name"], entry.get("precisione", "alta")
 
     cap_citta = " ".join(p for p in [cap, citta] if p)
     indirizzo_senza_civico = _CIVICO_RE.sub("", indirizzo).strip() if indirizzo else ""
+    indirizzo_senza_abbrev = _ABBREV_RE.sub("", indirizzo).strip() if indirizzo else ""
 
-    candidates = []
+    candidates = []  # lista di (query, livello_precisione)
 
     # 1) query strutturata (spesso la piu' affidabile quando i campi sono puliti)
     if indirizzo or citta:
@@ -98,41 +105,50 @@ def geocode_stop(indirizzo: str, cap: str, citta: str, provincia: str = ""):
             struct["city"] = citta
         if cap:
             struct["postalcode"] = cap
-        candidates.append(struct)
+        candidates.append((struct, "alta"))
 
     # 2) testo libero completo
     full_text = ", ".join(p for p in [indirizzo, cap_citta] if p)
     if full_text:
-        candidates.append(full_text)
+        candidates.append((full_text, "alta"))
 
-    # 3) via senza numero civico + citta' (nel caso Nominatim non abbia quel civico esatto)
+    # 3) via SENZA ABBREVIAZIONI PUNTATE (es. "Via G. Carducci" -> "Via Carducci"):
+    # Nominatim spesso non riconosce affatto le iniziali puntate nei nomi delle vie.
+    if indirizzo_senza_abbrev and indirizzo_senza_abbrev.lower() != indirizzo.lower():
+        full_text_no_abbrev = ", ".join(p for p in [indirizzo_senza_abbrev, cap_citta] if p)
+        candidates.append((full_text_no_abbrev, "alta"))
+
+    # 4) via senza numero civico + citta' (nel caso Nominatim non abbia quel civico esatto)
     if indirizzo_senza_civico and citta and indirizzo_senza_civico.lower() != indirizzo.lower():
-        candidates.append(f"{indirizzo_senza_civico}, {citta}")
+        candidates.append((f"{indirizzo_senza_civico}, {citta}", "media"))
 
-    # 4) solo CAP + citta'
+    # 5) solo CAP + citta'
     if cap_citta:
-        candidates.append(cap_citta)
+        candidates.append((cap_citta, "bassa"))
 
-    # 5) solo citta' (ultima spiaggia: posiziona almeno vicino al centro citta')
+    # 6) solo citta' (ultima spiaggia: posiziona solo vicino al centro citta')
     if citta:
-        candidates.append(citta)
+        candidates.append((citta, "bassa"))
 
     location = None
-    for candidate in candidates:
+    precisione = None
+    for candidate, livello in candidates:
         location = _try_geocode(candidate)
         if location is not None:
+            precisione = livello
             break
 
     if location is None:
-        return None, None, None
+        return None, None, None, None
 
     _CACHE[cache_key] = {
         "lat": location.latitude,
         "lon": location.longitude,
         "display_name": location.address,
+        "precisione": precisione,
     }
     _save_cache(_CACHE)
-    return location.latitude, location.longitude, location.address
+    return location.latitude, location.longitude, location.address, precisione
 
 
 def search_candidates(query: str, limit: int = 5):
