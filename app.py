@@ -8,7 +8,7 @@ import re
 import pandas as pd
 import streamlit as st
 
-from src import clients_db, config, distance_matrix, geocode, maps_links, ocr_extract, optimizer
+from src import clients_db, config, distance_matrix, geocode, maps_links, ocr_extract, optimizer, pdf_export
 
 st.set_page_config(page_title="DNP Pharma - Pianificatore Giri", layout="wide")
 st.logo("assets/logo_dnp_pharma.png")
@@ -536,3 +536,15 @@ if "last_sim" in st.session_state and st.session_state.last_sim:
         st.markdown(f"**{link['label']}**")
         st.link_button(f"📍 Apri in Google Maps — {link['label']}", link["url"])
         st.code(link["url"], language=None)
+
+    st.subheader("5. Stampa ordine di consegna")
+    pdf_bytes = pdf_export.generate_delivery_order_pdf(
+        sim, stops, config.DEPOT_ADDRESS, departure.strftime("%H:%M")
+    )
+    st.download_button(
+        "📄 Scarica PDF Ordine Consegne",
+        data=pdf_bytes,
+        file_name="ordine_consegne.pdf",
+        mime="application/pdf",
+        type="primary",
+    )
