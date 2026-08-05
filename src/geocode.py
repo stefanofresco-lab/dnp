@@ -23,6 +23,11 @@ _CIVICO_RE = re.compile(r"\s*,?\s*\d+\s*\w{0,3}\s*$")
 # riconosce affatto (zero risultati), mentre senza l'iniziale puntata trova
 # correttamente la via.
 _ABBREV_RE = re.compile(r"\b[A-Za-zÀ-ÖØ-öø-ÿ]\.\s+")
+# "N 32" o "N. 32" prima del civico (tipico dei DDT: "Via Lombardia, N 32" =
+# "al numero 32"): questa "N" e' pura rumore per Nominatim e a volte fa
+# deragliare la ricerca strutturata su un risultato completamente sbagliato.
+# Va tolta SEMPRE, non solo come tentativo di riserva.
+_NUMERO_PREFIX_RE = re.compile(r"\bn\.?\s+(?=\d)", re.IGNORECASE)
 
 
 def _load_cache():
@@ -81,6 +86,7 @@ def geocode_stop(indirizzo: str, cap: str, citta: str, provincia: str = ""):
     punto e' solo indicativo, non l'indirizzo preciso). Ritorna
     (None, None, None, None) se nessuna variante trova un risultato."""
     indirizzo = (indirizzo or "").strip()
+    indirizzo = _NUMERO_PREFIX_RE.sub("", indirizzo).strip()
     cap = (cap or "").strip()
     citta = (citta or "").strip()
     provincia = (provincia or "").strip()
