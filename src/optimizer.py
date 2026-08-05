@@ -66,7 +66,11 @@ def simulate_route(order, stops, dist_km, dur_min, start_min, return_deadline_mi
 
         leg_km = dist_km[current_idx][target_idx]
         leg_dur = dur_min[current_idx][target_idx] * traffic_multiplier(current_time)
-        arrival = current_time + leg_dur
+        # Arrotonda l'arrivo al minuto SUBITO, prima di qualunque confronto: cosi'
+        # l'orario mostrato (es. "12:10") e' sempre esattamente quello usato nei
+        # controlli di chiusura pranzo/vincoli, senza scarti di pochi secondi
+        # nascosti dall'arrotondamento del solo display.
+        arrival = round(current_time + leg_dur)
         total_km += leg_km
 
         vincolo = stop.get("vincolo") or {"tipo": "nessuno", "orario_min": None, "orario_max": None}
@@ -146,7 +150,7 @@ def simulate_route(order, stops, dist_km, dur_min, start_min, return_deadline_mi
 
     leg_km = dist_km[current_idx][0]
     leg_dur = dur_min[current_idx][0] * traffic_multiplier(current_time)
-    arrival_depot = current_time + leg_dur
+    arrival_depot = round(current_time + leg_dur)
     total_km += leg_km
 
     if arrival_depot > return_deadline_min:
