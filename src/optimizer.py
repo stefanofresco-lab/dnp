@@ -76,7 +76,11 @@ def simulate_route(order, stops, dist_km, dur_min, start_min, return_deadline_mi
         vincolo = stop.get("vincolo") or {"tipo": "nessuno", "orario_min": None, "orario_max": None}
         tipo = vincolo.get("tipo", "nessuno")
 
-        if arrival < LUNCH_START_MIN and arrival + service_time_min <= LUNCH_START_MIN:
+        if arrival <= LAST_MORNING_SCARICO_DEADLINE_MIN:
+            # Se si arriva entro le 12:15 lo scarico puo' iniziare subito, anche
+            # se la sua durata lo fa finire oltre le 12:30: il limite e' sempre
+            # e solo sull'ORARIO DI INIZIO, indipendentemente da quanto dura lo
+            # scarico di quella tappa.
             service_start = arrival
         elif arrival >= LUNCH_END_MIN:
             service_start = arrival

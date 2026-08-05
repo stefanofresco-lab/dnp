@@ -277,34 +277,41 @@ with st.expander("➕ Aggiungi una tappa manualmente (senza DDT)"):
              "oppure lascia 'Nuovo cliente' e scrivi i dati a mano.",
     )
 
-    c1, c2 = st.columns(2)
-    with c1:
-        st.text_input("Cliente", key="manual_cliente")
-        st.text_input("Indirizzo", key="manual_indirizzo")
-        st.text_input("CAP", key="manual_cap")
-        st.text_input("Città", key="manual_citta")
-    with c2:
-        st.text_input("Provincia (sigla)", key="manual_provincia")
-        st.text_input(
-            "Vincolo (opzionale)",
-            key="manual_vincolo",
-            placeholder=(
-                f"{config.CONSTRAINT_MORNING} / {config.CONSTRAINT_AFTERNOON} / "
-                "Entro le 10:30 / Tra le 8:30 e le 9:00 / Ultima Consegna / Prima Consegna"
-            ),
-        )
-        st.text_input(
-            "Coordinate GPS (opzionale, da Google Maps)",
-            key="manual_coordinate",
-            placeholder="45.1234, 9.5678",
-            help="Su Google Maps, tasto destro sul punto esatto -> clicca sulle coordinate "
-                 "per copiarle -> incollale qui. Se compilato, l'app usa questo punto esatto "
-                 "invece di geocodificare l'indirizzo, garantendo che combaci con Google Maps.",
-        )
+    # Racchiuso in un st.form: senza, ogni text_input si aggiorna al volo con un
+    # proprio giro di rete, e cliccare "Aggiungi tappa" subito dopo aver scritto
+    # nell'ultimo campo (tipicamente Vincolo) puo' partire prima che quel valore
+    # sia stato registrato — costringendo a scriverlo due volte. Con st.form
+    # tutti i campi vengono letti insieme, in un solo colpo, solo alla conferma.
+    with st.form("manual_stop_form", clear_on_submit=False):
+        c1, c2 = st.columns(2)
+        with c1:
+            st.text_input("Cliente", key="manual_cliente")
+            st.text_input("Indirizzo", key="manual_indirizzo")
+            st.text_input("CAP", key="manual_cap")
+            st.text_input("Città", key="manual_citta")
+        with c2:
+            st.text_input("Provincia (sigla)", key="manual_provincia")
+            st.text_input(
+                "Vincolo (opzionale)",
+                key="manual_vincolo",
+                placeholder=(
+                    f"{config.CONSTRAINT_MORNING} / {config.CONSTRAINT_AFTERNOON} / "
+                    "Entro le 10:30 / Tra le 8:30 e le 9:00 / Ultima Consegna / Prima Consegna"
+                ),
+            )
+            st.text_input(
+                "Coordinate GPS (opzionale, da Google Maps)",
+                key="manual_coordinate",
+                placeholder="45.1234, 9.5678",
+                help="Su Google Maps, tasto destro sul punto esatto -> clicca sulle coordinate "
+                     "per copiarle -> incollale qui. Se compilato, l'app usa questo punto esatto "
+                     "invece di geocodificare l'indirizzo, garantendo che combaci con Google Maps.",
+            )
 
-    salva_in_anagrafica = st.checkbox("💾 Salva/aggiorna questo cliente in anagrafica", value=True)
+        salva_in_anagrafica = st.checkbox("💾 Salva/aggiorna questo cliente in anagrafica", value=True)
+        submitted = st.form_submit_button("Aggiungi tappa", type="primary")
 
-    if st.button("Aggiungi tappa", type="primary"):
+    if submitted:
         if not st.session_state.manual_cliente or not st.session_state.manual_indirizzo:
             st.warning("Inserisci almeno Cliente e Indirizzo.")
         elif st.session_state.manual_coordinate and not _parse_coordinate_field(st.session_state.manual_coordinate):
