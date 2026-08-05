@@ -1,4 +1,8 @@
 streamlit>=1.38.0
+# Starlette e' bloccata al minimo dichiarato compatibile da Streamlit: versioni
+# 1.x di Starlette rompono l'avvio di Streamlit (GZipMiddleware richiede un
+# parametro nuovo che Streamlit non passa ancora).
+starlette==0.46.0
 pandas>=2.2.2
 pyarrow>=18.1.0
 pdfplumber>=0.11.4
