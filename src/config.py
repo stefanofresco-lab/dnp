@@ -6,15 +6,21 @@ DEPOT_NAME = "Deposito DNP Pharma - Dormelletto"
 DEPOT_ADDRESS = "Via Matteotti, 28040 Dormelletto (NO), Italia"
 
 DEFAULT_DEPARTURE = time(7, 30)
-DEPARTURE_MIN = time(7, 30)
-DEPARTURE_MAX = time(8, 0)
+DEPARTURE_MIN = time(7, 0)
+DEPARTURE_MAX = time(8, 30)
 DEFAULT_RETURN_DEADLINE = time(16, 30)
+RETURN_DEADLINE_MIN = time(12, 0)
+RETURN_DEADLINE_MAX = time(19, 0)
 
-SERVICE_TIME_MIN = 20  # minuti fissi di scarico per tappa
+DEFAULT_SERVICE_TIME_MIN = 20  # minuti di scarico per tappa, modificabile dall'utente
+SERVICE_TIME_OPTIONS_MIN = 5
+SERVICE_TIME_OPTIONS_MAX = 60
 
 LUNCH_START = time(12, 30)
 LUNCH_END = time(14, 0)
-LAST_MORNING_ARRIVAL_DEADLINE = time(12, 10)
+# Ultimo orario ammesso per l'INIZIO SCARICO (non il semplice arrivo) dell'ultima
+# consegna della mattina, per garantire che si chiuda prima della pausa pranzo.
+LAST_MORNING_SCARICO_DEADLINE = time(12, 15)
 
 # Velocità media di riferimento (km/h) usata solo come fallback quando OSRM
 # non è raggiungibile (distanza stimata via Haversine * fattore rete stradale).
@@ -24,8 +30,11 @@ ROAD_NETWORK_FACTOR = 1.30  # correzione Haversine -> percorso stradale reale
 # Fasce orarie con traffico storico simulato: (ora_inizio, ora_fine, moltiplicatore_tempo)
 TRAFFIC_BANDS = [
     (time(8, 0), time(9, 0), 1.20),
-    (time(13, 0), time(14, 0), 1.20),
 ]
+
+ROUTE_MODE_SHORTEST = "Percorso Più Breve"
+ROUTE_MODE_FASTEST = "Percorso Più Veloce"
+ROUTE_MODE_OPTIONS = [ROUTE_MODE_SHORTEST, ROUTE_MODE_FASTEST]
 
 CONSTRAINT_NONE = "Nessuno"
 CONSTRAINT_MORNING = "Solo Mattina"
@@ -34,6 +43,13 @@ CONSTRAINT_OPTIONS = [CONSTRAINT_NONE, CONSTRAINT_MORNING, CONSTRAINT_AFTERNOON]
 
 _VINCOLO_TIME_TOKEN_RE = re.compile(r"(\d{1,2})(?:[:.](\d{2}))?")
 _VINCOLO_POSIZIONE_NUM_RE = re.compile(r"(?:consegna|posizione|tappa)\s*n?°?\.?\s*(\d+)")
+
+# Ordinali italiani per forzare una posizione assoluta nel giro (es. "Prima Consegna" = 1)
+_VINCOLO_ORDINALI = {
+    "prima": 1, "seconda": 2, "terza": 3, "quarta": 4,
+    "quinta": 5, "sesta": 6, "settima": 7, "ottava": 8,
+    "nona": 9, "decima": 10,
+}
 
 _VINCOLO_EMPTY = {
     "tipo": "nessuno", "orario_min": None, "orario_max": None,
@@ -73,6 +89,9 @@ def parse_vincolo(value) -> dict:
     m = _VINCOLO_POSIZIONE_NUM_RE.search(v)
     if m:
         return {**_VINCOLO_EMPTY, "tipo": "posizione", "posizione_assoluta": int(m.group(1))}
+    for parola, numero in _VINCOLO_ORDINALI.items():
+        if re.search(rf"\b{parola}\b", v):
+            return {**_VINCOLO_EMPTY, "tipo": "posizione", "posizione_assoluta": numero}
     if "terzultima" in v:
         return {**_VINCOLO_EMPTY, "tipo": "posizione", "posizione_da_fine": 2}
     if "penultima" in v:

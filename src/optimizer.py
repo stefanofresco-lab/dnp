@@ -5,6 +5,12 @@ poi rifinisce con ricerca locale (2-opt / or-opt) valutando ESATTAMENTE tutti i
 vincoli orari tramite simulazione temporale — necessario perche' il tempo di
 percorrenza dipende dall'ora del giorno (traffico) e OR-Tools non modella bene
 finestre temporali time-dependent insieme a soste di chiusura pranzo.
+
+L'orario di rientro e' SEMPRE trattato come un limite massimo (vincolo di
+fattibilita'), mai come un obiettivo: l'algoritmo cerca sempre il percorso
+migliore secondo la modalita' scelta (piu' breve in km o piu' veloce in tempo)
+indipendentemente da quanto margine lascia il rientro scelto — non "spreca"
+mai km o minuti per riempire il tempo disponibile.
 """
 from datetime import time
 
@@ -17,8 +23,7 @@ def _t2m(t: time) -> float:
 
 LUNCH_START_MIN = _t2m(config.LUNCH_START)
 LUNCH_END_MIN = _t2m(config.LUNCH_END)
-LAST_MORNING_DEADLINE_MIN = _t2m(config.LAST_MORNING_ARRIVAL_DEADLINE)
-SERVICE_MIN = config.SERVICE_TIME_MIN
+LAST_MORNING_SCARICO_DEADLINE_MIN = _t2m(config.LAST_MORNING_SCARICO_DEADLINE)
 TRAFFIC_BANDS_MIN = [(_t2m(a), _t2m(b), f) for a, b, f in config.TRAFFIC_BANDS]
 
 
@@ -34,16 +39,23 @@ def traffic_multiplier(clock_min: float) -> float:
     return 1.0
 
 
-def simulate_route(order, stops, dist_km, dur_min, start_min, return_deadline_min):
+def simulate_route(order, stops, dist_km, dur_min, start_min, return_deadline_min,
+                    service_time_min=None):
     """order: lista di indici (0-based) in `stops` nell'ordine di visita.
-    Ritorna un dizionario con schedule dettagliato, km totali, fattibilita' e violazioni.
+    service_time_min: minuti di scarico fissi per ogni tappa (default da config).
+    Ritorna un dizionario con schedule dettagliato, km totali, tempo totale,
+    fattibilita' e violazioni.
     """
+    service_time_min = (
+        config.DEFAULT_SERVICE_TIME_MIN if service_time_min is None else service_time_min
+    )
+
     current_time = start_min
     current_idx = 0  # 0 = deposito nella matrice
     total_km = 0.0
     schedule = []
     violations = []  # ciascuna: {"message": str, "overage_min": float}
-    morning_arrivals = []  # (position, arrival_min, stop_index)
+    morning_stops = []  # (position, service_start_min, stop_index) per le tappe servite prima di pranzo
 
     for pos, stop_i in enumerate(order):
         target_idx = stop_i + 1
@@ -57,7 +69,7 @@ def simulate_route(order, stops, dist_km, dur_min, start_min, return_deadline_mi
         vincolo = stop.get("vincolo") or {"tipo": "nessuno", "orario_min": None, "orario_max": None}
         tipo = vincolo.get("tipo", "nessuno")
 
-        if arrival < LUNCH_START_MIN and arrival + SERVICE_MIN <= LUNCH_START_MIN:
+        if arrival < LUNCH_START_MIN and arrival + service_time_min <= LUNCH_START_MIN:
             service_start = arrival
         elif arrival >= LUNCH_END_MIN:
             service_start = arrival
@@ -83,7 +95,7 @@ def simulate_route(order, stops, dist_km, dur_min, start_min, return_deadline_mi
             # violato piu' sotto, se non piu' rispettabile).
             service_start = LUNCH_END_MIN
 
-        departure = service_start + SERVICE_MIN
+        departure = service_start + service_time_min
 
         if tipo == "mattina" and service_start >= LUNCH_START_MIN:
             # Arrivo troppo tardi per rispettare "Solo Mattina": non recuperabile attendendo.
@@ -112,7 +124,7 @@ def simulate_route(order, stops, dist_km, dur_min, start_min, return_deadline_mi
             })
 
         if service_start < LUNCH_START_MIN:
-            morning_arrivals.append((pos, arrival, stop_i))
+            morning_stops.append((pos, service_start, stop_i))
 
         schedule.append({
             "posizione": pos + 1,
@@ -141,21 +153,25 @@ def simulate_route(order, stops, dist_km, dur_min, start_min, return_deadline_mi
             "overage_min": arrival_depot - return_deadline_min,
         })
 
-    if morning_arrivals:
-        _, last_arrival, last_stop_i = morning_arrivals[-1]
-        if last_arrival > LAST_MORNING_DEADLINE_MIN:
+    if morning_stops:
+        # L'ultimo scarico mattutino (per ordine di visita) deve iniziare entro
+        # LAST_MORNING_SCARICO_DEADLINE_MIN, non solo l'arrivo: e' l'inizio
+        # scarico che deve avvenire in tempo per chiudere prima delle 12:30.
+        _, last_service_start, last_stop_i = morning_stops[-1]
+        if last_service_start > LAST_MORNING_SCARICO_DEADLINE_MIN:
             violations.append({
-                "message": f"Ultima consegna mattutina ({stops[last_stop_i]['cliente']}) prevista "
-                           f"alle {min_to_hhmm(last_arrival)}, oltre le "
-                           f"{min_to_hhmm(LAST_MORNING_DEADLINE_MIN)} richieste per chiudere prima "
-                           f"della pausa pranzo",
-                "overage_min": last_arrival - LAST_MORNING_DEADLINE_MIN,
+                "message": f"Ultima consegna mattutina ({stops[last_stop_i]['cliente']}): scarico "
+                           f"previsto alle {min_to_hhmm(last_service_start)}, oltre le "
+                           f"{min_to_hhmm(LAST_MORNING_SCARICO_DEADLINE_MIN)} richieste per chiudere "
+                           f"prima della pausa pranzo",
+                "overage_min": last_service_start - LAST_MORNING_SCARICO_DEADLINE_MIN,
             })
 
     return {
         "order": order,
         "schedule": schedule,
         "total_km": round(total_km, 1),
+        "total_time_min": round(arrival_depot - start_min, 1),
         "arrival_depot": arrival_depot,
         "arrival_depot_hhmm": min_to_hhmm(arrival_depot),
         "feasible": len(violations) == 0,
@@ -163,9 +179,10 @@ def simulate_route(order, stops, dist_km, dur_min, start_min, return_deadline_mi
     }
 
 
-def _score(sim):
+def _score(sim, route_mode=None):
     overage = sum(v["overage_min"] for v in sim["violations"])
-    return (0 if sim["feasible"] else 1, overage, sim["total_km"])
+    metric = sim["total_time_min"] if route_mode == config.ROUTE_MODE_FASTEST else sim["total_km"]
+    return (0 if sim["feasible"] else 1, overage, metric)
 
 
 def _nearest_neighbor_order(n, dist_km):
@@ -180,11 +197,27 @@ def _nearest_neighbor_order(n, dist_km):
     return order
 
 
-def _ortools_worker(n, dist_km, result_queue):
+def _nearest_neighbor_order_time(n, dur_min):
+    """Come _nearest_neighbor_order ma sceglie il prossimo per tempo di
+    percorrenza (usato come seed quando la modalita' e' 'Percorso Più Veloce')."""
+    unvisited = set(range(n))
+    order = []
+    current = 0
+    while unvisited:
+        nxt = min(unvisited, key=lambda j: dur_min[current][j + 1])
+        order.append(nxt)
+        unvisited.remove(nxt)
+        current = nxt + 1
+    return order
+
+
+def _ortools_worker(n, matrix, result_queue):
     """Eseguito in un processo separato: il risolutore nativo di OR-Tools puo'
     incorrere in crash a basso livello (segfault) su alcune combinazioni di
     piattaforma/versione. Isolandolo in un sotto-processo, un eventuale crash
-    termina solo questo processo senza mai coinvolgere il server Streamlit."""
+    termina solo questo processo senza mai coinvolgere il server Streamlit.
+    `matrix` puo' essere la matrice km o la matrice minuti, a seconda della
+    modalita' di ottimizzazione richiesta."""
     try:
         from ortools.constraint_solver import pywrapcp, routing_enums_pb2
     except ImportError:
@@ -195,12 +228,12 @@ def _ortools_worker(n, dist_km, result_queue):
     manager = pywrapcp.RoutingIndexManager(size, 1, 0)
     routing = pywrapcp.RoutingModel(manager)
 
-    def distance_callback(from_index, to_index):
+    def cost_callback(from_index, to_index):
         i = manager.IndexToNode(from_index)
         j = manager.IndexToNode(to_index)
-        return int(dist_km[i][j] * 1000)
+        return int(matrix[i][j] * 1000)
 
-    transit_idx = routing.RegisterTransitCallback(distance_callback)
+    transit_idx = routing.RegisterTransitCallback(cost_callback)
     routing.SetArcCostEvaluatorOfAllVehicles(transit_idx)
 
     search_params = pywrapcp.DefaultRoutingSearchParameters()
@@ -227,12 +260,12 @@ def _ortools_worker(n, dist_km, result_queue):
     result_queue.put(order)
 
 
-def _ortools_tsp_order(n, dist_km, timeout_sec=6):
+def _ortools_tsp_order(n, matrix, timeout_sec=6):
     import multiprocessing as mp
 
     ctx = mp.get_context("spawn")
     result_queue = ctx.Queue()
-    process = ctx.Process(target=_ortools_worker, args=(n, dist_km, result_queue))
+    process = ctx.Process(target=_ortools_worker, args=(n, matrix, result_queue))
     process.start()
     process.join(timeout_sec)
 
@@ -253,10 +286,11 @@ def _ortools_tsp_order(n, dist_km, timeout_sec=6):
 
 
 def resolve_position_pins(stops):
-    """Risolve i vincoli di posizione forzata (Ultima/Penultima/Consegna N) in
-    posizioni assolute 1-based, rispetto al numero totale di tappe. In caso di
-    conflitto (due tappe che rivendicano la stessa posizione) vince la prima
-    trovata; le altre restano libere e vengono segnalate."""
+    """Risolve i vincoli di posizione forzata (Ultima/Penultima/Consegna N/
+    ordinali italiani) in posizioni assolute 1-based, rispetto al numero
+    totale di tappe. In caso di conflitto (due tappe che rivendicano la
+    stessa posizione) vince la prima trovata; le altre restano libere e
+    vengono segnalate."""
     n = len(stops)
     claimed = {}
     pins = {}
@@ -303,11 +337,14 @@ def _respects_pins(order, pins):
     return all(order[pos - 1] == stop_i for stop_i, pos in pins.items())
 
 
-def _local_search(order, stops, dist_km, dur_min, start_min, return_deadline_min, pins=None, max_iters=2000):
+def _local_search(order, stops, dist_km, dur_min, start_min, return_deadline_min,
+                   pins=None, service_time_min=None, route_mode=None, max_iters=2000):
     pins = pins or {}
     best_order = _apply_pins_to_order(order[:], pins)
-    best_sim = simulate_route(best_order, stops, dist_km, dur_min, start_min, return_deadline_min)
-    best_score = _score(best_sim)
+    best_sim = simulate_route(
+        best_order, stops, dist_km, dur_min, start_min, return_deadline_min, service_time_min
+    )
+    best_score = _score(best_sim, route_mode)
 
     n = len(order)
     improved = True
@@ -323,8 +360,10 @@ def _local_search(order, stops, dist_km, dur_min, start_min, return_deadline_min
                 candidate = best_order[:i] + best_order[i:j + 1][::-1] + best_order[j + 1:]
                 if not _respects_pins(candidate, pins):
                     continue
-                sim = simulate_route(candidate, stops, dist_km, dur_min, start_min, return_deadline_min)
-                score = _score(sim)
+                sim = simulate_route(
+                    candidate, stops, dist_km, dur_min, start_min, return_deadline_min, service_time_min
+                )
+                score = _score(sim, route_mode)
                 if score < best_score:
                     best_order, best_sim, best_score = candidate, sim, score
                     improved = True
@@ -341,8 +380,10 @@ def _local_search(order, stops, dist_km, dur_min, start_min, return_deadline_min
                 candidate.insert(j, stop_val)
                 if not _respects_pins(candidate, pins):
                     continue
-                sim = simulate_route(candidate, stops, dist_km, dur_min, start_min, return_deadline_min)
-                score = _score(sim)
+                sim = simulate_route(
+                    candidate, stops, dist_km, dur_min, start_min, return_deadline_min, service_time_min
+                )
+                score = _score(sim, route_mode)
                 if score < best_score:
                     best_order, best_sim, best_score = candidate, sim, score
                     improved = True
@@ -350,35 +391,48 @@ def _local_search(order, stops, dist_km, dur_min, start_min, return_deadline_min
     return best_order, best_sim
 
 
-def solve(stops, dist_km, dur_min, start_min, return_deadline_min):
+def solve(stops, dist_km, dur_min, start_min, return_deadline_min,
+          service_time_min=None, route_mode=None):
     """stops: lista di dict con almeno 'cliente', 'indirizzo_completo', 'vincolo', 'lat', 'lon'.
     dist_km / dur_min: matrici (n+1)x(n+1), indice 0 = deposito.
+    service_time_min: minuti di scarico fissi per tappa (default da config).
+    route_mode: config.ROUTE_MODE_SHORTEST (minimizza km, default) oppure
+    config.ROUTE_MODE_FASTEST (minimizza il tempo totale di giro). L'orario di
+    rientro resta SEMPRE solo un limite massimo di fattibilita', mai un
+    obiettivo: a parita' di vincoli il risultato non cambia in base a quanto
+    margine lascia il rientro scelto.
     Ritorna il miglior sim trovato (vedi simulate_route).
     """
     n = len(stops)
     if n == 0:
         return None
 
+    optimize_matrix = dur_min if route_mode == config.ROUTE_MODE_FASTEST else dist_km
+
     candidate_orders = []
 
-    ortools_order = _ortools_tsp_order(n, dist_km)
+    ortools_order = _ortools_tsp_order(n, optimize_matrix)
     if ortools_order:
         candidate_orders.append(ortools_order)
 
-    candidate_orders.append(_nearest_neighbor_order(n, dist_km))
+    if route_mode == config.ROUTE_MODE_FASTEST:
+        candidate_orders.append(_nearest_neighbor_order_time(n, dur_min))
+    else:
+        candidate_orders.append(_nearest_neighbor_order(n, dist_km))
 
     # seed euristico: deadline/mattina prima (le deadline in ordine di orario),
-    # nessun vincolo in mezzo (per distanza dal deposito), pomeriggio dopo.
+    # nessun vincolo in mezzo (per distanza/tempo dal deposito), pomeriggio dopo.
     def sort_key(i):
         v = stops[i].get("vincolo") or {"tipo": "nessuno", "orario_min": None, "orario_max": None}
         tipo = v.get("tipo", "nessuno")
+        base = dur_min[0][i + 1] if route_mode == config.ROUTE_MODE_FASTEST else dist_km[0][i + 1]
         if tipo in ("deadline", "finestra"):
             return (0, v.get("orario_min") or 0)
         if tipo == "mattina":
             return (0, LUNCH_START_MIN)
         if tipo == "nessuno":
-            return (1, dist_km[0][i + 1])
-        return (2, dist_km[0][i + 1])  # pomeriggio
+            return (1, base)
+        return (2, base)  # pomeriggio
 
     candidate_orders.append(sorted(range(n), key=sort_key))
 
@@ -387,9 +441,10 @@ def solve(stops, dist_km, dur_min, start_min, return_deadline_min):
     best_sim = None
     for init_order in candidate_orders:
         order, sim = _local_search(
-            init_order, stops, dist_km, dur_min, start_min, return_deadline_min, pins=pins
+            init_order, stops, dist_km, dur_min, start_min, return_deadline_min,
+            pins=pins, service_time_min=service_time_min, route_mode=route_mode,
         )
-        if best_sim is None or _score(sim) < _score(best_sim):
+        if best_sim is None or _score(sim, route_mode) < _score(best_sim, route_mode):
             best_sim = sim
 
     if conflicts:

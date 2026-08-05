@@ -109,7 +109,8 @@ def find_client(nome: str):
     return None
 
 
-def upsert_client(cliente: str, indirizzo: str, cap: str, citta: str, provincia: str, vincolo: str = ""):
+def upsert_client(cliente: str, indirizzo: str, cap: str, citta: str, provincia: str,
+                   vincolo: str = "", coordinate: str = ""):
     """Salva o aggiorna un cliente in anagrafica (upsert per nome)."""
     if not cliente or not cliente.strip():
         return
@@ -121,6 +122,7 @@ def upsert_client(cliente: str, indirizzo: str, cap: str, citta: str, provincia:
         "citta": citta or "",
         "provincia": provincia or "",
         "vincolo": vincolo or "",
+        "coordinate": coordinate or "",
     }
     _save(db)
 
