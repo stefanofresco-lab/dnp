@@ -108,12 +108,16 @@ with st.sidebar:
         step=5,
     )
 
+    _traffic_desc = ", ".join(
+        f"+{round((fattore - 1) * 100)}% {inizio.strftime('%H:%M')}-{fine.strftime('%H:%M')}"
+        for inizio, fine, fattore in config.TRAFFIC_BANDS
+    )
     st.markdown("---")
     st.caption(
         f"Regole applicate: magazzini chiusi 12:30-14:00 (si può viaggiare ma non scaricare), "
         f"ultimo inizio scarico mattutino entro le "
         f"{config.LAST_MORNING_SCARICO_DEADLINE.strftime('%H:%M')}, "
-        f"traffico storico +20% nella fascia 08:00-09:00."
+        f"traffico storico {_traffic_desc}."
     )
 
 st.subheader("1. Acquisizione ordini (DDT)")
