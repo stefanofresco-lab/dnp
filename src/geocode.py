@@ -16,6 +16,7 @@ from . import config
 
 _geolocator = Nominatim(user_agent=config.NOMINATIM_USER_AGENT, timeout=10)
 _geocode_raw = RateLimiter(_geolocator.geocode, min_delay_seconds=1.1, max_retries=2)
+_geocode_multi_raw = RateLimiter(_geolocator.geocode, min_delay_seconds=1.1, max_retries=1)
 
 _CIVICO_RE = re.compile(r"\s*,?\s*\d+\s*\w{0,3}\s*$")
 
@@ -132,3 +133,44 @@ def geocode_stop(indirizzo: str, cap: str, citta: str, provincia: str = ""):
     }
     _save_cache(_CACHE)
     return location.latitude, location.longitude, location.address
+
+
+def search_candidates(query: str, limit: int = 5):
+    """Cerca fino a `limit` possibili corrispondenze per una ricerca libera —
+    utile per cercare per NOME di una struttura (es. "Ospedale Gavazzeni
+    Bergamo") invece che per indirizzo formale, quando il magazzino/punto di
+    consegna non e' alla stessa sede legale/anagrafica della struttura.
+    Ritorna una lista di dict {"lat", "lon", "display_name"} (puo' essere
+    vuota se non trova nulla — non solleva mai eccezioni, cosi' l'interfaccia
+    non resta mai bloccata in attesa)."""
+    query = (query or "").strip()
+    if not query:
+        return []
+    try:
+        results = _geocode_multi_raw(
+            query, country_codes="it", exactly_one=False, limit=limit, addressdetails=True
+        )
+    except Exception:
+        results = None
+    if not results:
+        return []
+
+    candidates = []
+    for r in results:
+        addr = (r.raw or {}).get("address", {})
+        road = addr.get("road", "")
+        house_number = addr.get("house_number", "")
+        indirizzo = f"{road} {house_number}".strip() if road else ""
+        citta = (
+            addr.get("city") or addr.get("town") or addr.get("village")
+            or addr.get("municipality") or ""
+        )
+        candidates.append({
+            "lat": r.latitude,
+            "lon": r.longitude,
+            "display_name": r.address,
+            "indirizzo": indirizzo,
+            "cap": addr.get("postcode", ""),
+            "citta": citta,
+        })
+    return candidates

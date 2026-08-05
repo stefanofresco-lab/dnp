@@ -42,11 +42,13 @@ def traffic_multiplier(clock_min: float) -> float:
 def simulate_route(order, stops, dist_km, dur_min, start_min, return_deadline_min,
                     service_time_min=None):
     """order: lista di indici (0-based) in `stops` nell'ordine di visita.
-    service_time_min: minuti di scarico fissi per ogni tappa (default da config).
-    Ritorna un dizionario con schedule dettagliato, km totali, tempo totale,
-    fattibilita' e violazioni.
+    service_time_min: minuti di scarico di DEFAULT per le tappe che non hanno
+    un proprio "tempo_scarico" impostato (una tappa puo' sovrascrivere il
+    default globale mettendo stop["tempo_scarico"] = minuti). Ritorna un
+    dizionario con schedule dettagliato, km totali, tempo totale, fattibilita'
+    e violazioni.
     """
-    service_time_min = (
+    default_service_time = (
         config.DEFAULT_SERVICE_TIME_MIN if service_time_min is None else service_time_min
     )
 
@@ -60,6 +62,7 @@ def simulate_route(order, stops, dist_km, dur_min, start_min, return_deadline_mi
     for pos, stop_i in enumerate(order):
         target_idx = stop_i + 1
         stop = stops[stop_i]
+        service_time_min = stop.get("tempo_scarico") or default_service_time
 
         leg_km = dist_km[current_idx][target_idx]
         leg_dur = dur_min[current_idx][target_idx] * traffic_multiplier(current_time)

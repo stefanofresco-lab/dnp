@@ -12,7 +12,10 @@ from src import clients_db, config, distance_matrix, geocode, maps_links, ocr_ex
 
 st.set_page_config(page_title="DNP Pharma - Pianificatore Giri", layout="wide")
 
-STOPS_COLUMNS = ["Cliente", "Indirizzo", "CAP", "Citta", "Provincia", "Vincolo", "Coordinate GPS"]
+STOPS_COLUMNS = [
+    "Cliente", "Indirizzo", "CAP", "Citta", "Provincia", "Vincolo",
+    "Coordinate GPS", "Tempo Scarico (min)",
+]
 
 if "stops_df" not in st.session_state:
     st.session_state.stops_df = pd.DataFrame(columns=STOPS_COLUMNS)
@@ -163,6 +166,7 @@ if uploaded_files:
                     "Provincia": info["provincia"],
                     "Vincolo": config.CONSTRAINT_NONE,
                     "Coordinate GPS": "",
+                    "Tempo Scarico (min)": "",
                 })
             except Exception as e:
                 errors.append(f"{f.name}: errore di estrazione ({e})")
@@ -209,6 +213,53 @@ def _autofill_from_saved_client():
         st.session_state.manual_vincolo = match.get("vincolo", "")
         st.session_state.manual_coordinate = match.get("coordinate", "")
 
+
+st.session_state.setdefault("search_results", [])
+
+
+def _usa_candidato(cand):
+    """Applica un candidato di ricerca confermato ai campi del modulo manuale
+    (eseguito PRIMA che i widget del modulo vengano istanziati in questo run,
+    quindi puo' impostarne il valore in sicurezza)."""
+    st.session_state.manual_coordinate = f"{cand['lat']}, {cand['lon']}"
+    if cand.get("indirizzo"):
+        st.session_state.manual_indirizzo = cand["indirizzo"]
+    if cand.get("cap"):
+        st.session_state.manual_cap = cand["cap"]
+    if cand.get("citta"):
+        st.session_state.manual_citta = cand["citta"]
+    st.session_state.search_results = []
+
+
+with st.expander("🔍 Cerca e conferma un indirizzo (consigliato per ospedali/RSA/strutture)"):
+    st.caption(
+        "Cerca per **nome della struttura** (es. \"Ospedale Gavazzeni Bergamo\", \"RSA Villa Serena\") "
+        "oppure per indirizzo. Utile quando il magazzino/punto di consegna non è alla stessa sede "
+        "legale della struttura: vedi fino a 5 risultati con l'indirizzo completo e scegli tu quello "
+        "giusto, invece di far indovinare all'app — come un navigatore che chiede conferma."
+    )
+    search_query = st.text_input(
+        "Nome struttura o indirizzo da cercare", key="search_query",
+        placeholder="Ospedale Gavazzeni Bergamo",
+    )
+    if st.button("🔍 Cerca"):
+        with st.spinner("Ricerca in corso (max qualche secondo)..."):
+            st.session_state.search_results = geocode.search_candidates(search_query)
+        if not st.session_state.search_results:
+            st.warning(
+                "Nessun risultato trovato per questa ricerca. Prova con un nome/indirizzo diverso, "
+                "oppure inserisci le coordinate manualmente nel modulo qui sotto."
+            )
+
+    for i, cand in enumerate(st.session_state.search_results):
+        col_a, col_b = st.columns([5, 1])
+        with col_a:
+            st.write(f"📍 {cand['display_name']}")
+        with col_b:
+            if st.button("✅ Usa questo", key=f"usa_candidato_{i}"):
+                _usa_candidato(cand)
+                st.success("Confermato! Completa Cliente e gli altri campi qui sotto, poi 'Aggiungi tappa'.")
+                st.rerun()
 
 with st.expander("➕ Aggiungi una tappa manualmente (senza DDT)"):
     saved_names = [c["cliente"] for c in clients_db.list_clients()]
@@ -312,8 +363,9 @@ st.caption(
     "Modifica gli indirizzi se necessario e imposta qui le priorità delle tappe, se ce ne sono — "
     "altrimenti lascia il campo Vincolo vuoto e il calcolo del giro sarà completamente automatico. "
     "Il campo **Coordinate GPS** è opzionale: se lo compili (incollando 'lat, lon' copiato da Google "
-    "Maps), l'app usa quel punto esatto invece di geocodificare l'indirizzo — utile se un indirizzo "
-    "viene posizionato in modo impreciso."
+    "Maps, o confermato con la ricerca qui sotto), l'app usa quel punto esatto invece di "
+    "geocodificare l'indirizzo. Il campo **Tempo Scarico (min)** è opzionale: se vuoto usa il valore "
+    "impostato in sidebar, altrimenti quello scritto qui vale solo per quella tappa."
 )
 
 with st.expander("❓ Guida: come scrivere il campo Vincolo"):
@@ -382,12 +434,20 @@ def calcola_giro():
             if lat is None:
                 geocode_errors.append(row.get("Cliente", "?"))
                 continue
+
+            tempo_scarico_raw = row.get("Tempo Scarico (min)", "")
+            try:
+                tempo_scarico = int(float(tempo_scarico_raw)) if str(tempo_scarico_raw).strip() else None
+            except (TypeError, ValueError):
+                tempo_scarico = None
+
             stops.append({
                 "cliente": row.get("Cliente", ""),
                 "indirizzo_completo": display_name or full_addr,
                 "vincolo": config.parse_vincolo(row.get("Vincolo")),
                 "lat": lat,
                 "lon": lon,
+                "tempo_scarico": tempo_scarico,
             })
 
         if geocode_errors:
