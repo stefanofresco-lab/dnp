@@ -40,7 +40,7 @@ ROAD_TIME_CORRECTION_FACTOR = 1.30
 
 # Fasce orarie con traffico storico simulato: (ora_inizio, ora_fine, moltiplicatore_tempo)
 TRAFFIC_BANDS = [
-    (time(8, 0), time(9, 0), 1.25),
+    (time(8, 0), time(10, 0), 1.25),
 ]
 
 ROUTE_MODE_SHORTEST = "Percorso Più Breve"
