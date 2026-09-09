@@ -17,8 +17,10 @@ CLIENTS_DB_PATH = "data/clienti.json"
 
 
 def _get_github_config():
-    """Ritorna (token, repo) se configurati nei secrets di Streamlit, altrimenti
-    (None, None) — nel qual caso si usa il file locale."""
+    """Ritorna (token, repo) se configurati, altrimenti (None, None) — nel qual
+    caso si usa il file locale. Cerca prima nei secrets di Streamlit (Streamlit
+    Community Cloud), poi nelle variabili d'ambiente GITHUB_TOKEN/GITHUB_REPO
+    (Render.com e altre piattaforme che non hanno il meccanismo st.secrets)."""
     try:
         import streamlit as st
         token = st.secrets.get("github_token")
@@ -27,6 +29,12 @@ def _get_github_config():
             return token, repo
     except Exception:
         pass
+
+    token = os.environ.get("GITHUB_TOKEN")
+    repo = os.environ.get("GITHUB_REPO")
+    if token and repo:
+        return token, repo
+
     return None, None
 
 
