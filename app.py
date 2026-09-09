@@ -46,9 +46,12 @@ if "depot_coord" not in st.session_state:
 
 
 def _geocode_depot():
+    # L'indirizzo del deposito non cambia mai: si usano le coordinate fisse in
+    # config.py, senza dipendere dal servizio di geocodifica gratuito (che puo'
+    # rispondere "troppe richieste" - 429 - specialmente su hosting condivisi
+    # come Render, dove l'IP in uscita e' condiviso con tante altre app).
     if st.session_state.depot_coord is None:
-        lat, lon, _ = geocode.geocode_address(config.DEPOT_ADDRESS)
-        st.session_state.depot_coord = (lat, lon)
+        st.session_state.depot_coord = (config.DEPOT_LAT, config.DEPOT_LON)
     return st.session_state.depot_coord
 
 

@@ -4,6 +4,14 @@ from datetime import time
 
 DEPOT_NAME = "Deposito DNP Pharma - Dormelletto"
 DEPOT_ADDRESS = "Via Matteotti, 28040 Dormelletto (NO), Italia"
+# Coordinate del deposito gia' risolte una volta per tutte: l'indirizzo del
+# deposito non cambia mai, quindi non ha senso ri-geocodificarlo ad ogni
+# calcolo del giro. Evita del tutto la dipendenza (e il rischio di errore
+# "429 Too Many Requests") dal servizio di geocodifica gratuito per il punto
+# piu' critico dell'app: se Nominatim e' irraggiungibile o limita le
+# richieste, il deposito resta comunque sempre disponibile.
+DEPOT_LAT = 45.7428532
+DEPOT_LON = 8.5651467
 
 DEFAULT_DEPARTURE = time(7, 30)
 DEPARTURE_MIN = time(7, 0)

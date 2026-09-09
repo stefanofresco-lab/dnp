@@ -15,8 +15,17 @@ from geopy.extra.rate_limiter import RateLimiter
 from . import config
 
 _geolocator = Nominatim(user_agent=config.NOMINATIM_USER_AGENT, timeout=10)
-_geocode_raw = RateLimiter(_geolocator.geocode, min_delay_seconds=1.1, max_retries=2)
-_geocode_multi_raw = RateLimiter(_geolocator.geocode, min_delay_seconds=1.1, max_retries=1)
+# Su hosting condivisi (es. Render) l'IP in uscita e' condiviso con tante
+# altre app: Nominatim a volte risponde "429 Too Many Requests" anche se la
+# nostra app da sola rispetta 1 richiesta/secondo. error_wait_seconds fa
+# aspettare qualche secondo in piu' prima di ritentare in quel caso, invece
+# di arrendersi subito.
+_geocode_raw = RateLimiter(
+    _geolocator.geocode, min_delay_seconds=1.1, max_retries=3, error_wait_seconds=3.0
+)
+_geocode_multi_raw = RateLimiter(
+    _geolocator.geocode, min_delay_seconds=1.1, max_retries=2, error_wait_seconds=3.0
+)
 
 _CIVICO_RE = re.compile(r"\s*,?\s*\d+\s*\w{0,3}\s*$")
 # Abbreviazioni puntate tipo "G." in "Via G. Carducci": Nominatim spesso non le
