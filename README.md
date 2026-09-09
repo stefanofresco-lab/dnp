@@ -1,3 +1,14 @@
+---
+title: DNP Pharma Pianificatore Giri
+emoji: 🚚
+colorFrom: red
+colorTo: green
+sdk: streamlit
+python_version: "3.11"
+app_file: app.py
+pinned: false
+---
+
 # DNP Pharma — Pianificatore Giri di Consegna
 
 App web locale (Streamlit) per pianificare in modo ottimale i giri di consegna
