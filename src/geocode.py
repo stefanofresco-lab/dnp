@@ -4,11 +4,19 @@ Nominatim e' meno completo di Google Maps per molti indirizzi civici precisi,
 quindi qui si tenta una CASCATA di query via via piu' generiche (query
 strutturata, testo libero completo, senza numero civico, solo CAP/citta',
 solo citta') prima di arrendersi — spesso basta un formato leggermente
-diverso perche' lo stesso indirizzo, che esiste davvero, venga trovato."""
+diverso perche' lo stesso indirizzo, che esiste davvero, venga trovato.
+
+Su hosting condivisi (Render) e' capitato che il server pubblico di Nominatim
+blocchi/limiti (HTTP 429) l'IP in uscita, condiviso con tante altre app: in
+quel caso ogni query fallisce sempre, indipendentemente dai tentativi. Per
+questo, se Nominatim non risponde, si prova un secondo servizio gratuito
+completamente indipendente (Photon di komoot.io, nessuna chiave richiesta,
+infrastruttura diversa da OpenStreetMap.org) prima di arrendersi."""
 import json
 import os
 import re
 
+import requests
 from geopy.geocoders import Nominatim
 from geopy.extra.rate_limiter import RateLimiter
 
@@ -55,11 +63,71 @@ def _save_cache(cache):
 _CACHE = _load_cache()
 
 
-def _try_geocode(query):
+class _FallbackLocation:
+    """Imita l'oggetto Location di geopy (latitude/longitude/address), cosi'
+    il resto del codice puo' trattare un risultato Photon esattamente come
+    uno di Nominatim senza if/else sparsi ovunque."""
+
+    def __init__(self, latitude, longitude, address):
+        self.latitude = latitude
+        self.longitude = longitude
+        self.address = address
+
+
+def _query_to_text(query) -> str:
+    """Converte una query (stringa o dict strutturato in stile Nominatim) in
+    una stringa di testo libero, per interrogare Photon."""
+    if isinstance(query, str):
+        return query
+    parts = [query.get("street"), query.get("postalcode"), query.get("city"), "Italia"]
+    return ", ".join(p for p in parts if p)
+
+
+def _try_geocode_photon(query):
+    """Fallback su Photon (komoot.io): gratuito, senza chiave, infrastruttura
+    indipendente da Nominatim/OpenStreetMap.org. Usato solo quando Nominatim
+    non risponde (es. bloccato/limitato sull'IP condiviso di un hosting
+    gratuito). Non solleva mai eccezioni: ritorna None se fallisce."""
+    text = _query_to_text(query)
+    if not text:
+        return None
     try:
-        return _geocode_raw(query, country_codes="it", exactly_one=True)
+        resp = requests.get(
+            "https://photon.komoot.io/api/",
+            params={"q": text, "limit": 1, "lang": "it"},
+            timeout=8,
+        )
+        resp.raise_for_status()
+        features = resp.json().get("features") or []
     except Exception:
         return None
+    if not features:
+        return None
+    feat = features[0]
+    props = feat.get("properties", {})
+    if props.get("countrycode") and props["countrycode"] != "IT":
+        return None
+    lon, lat = feat["geometry"]["coordinates"]
+    address = ", ".join(
+        p for p in [
+            f"{props.get('street', '')} {props.get('housenumber', '')}".strip(),
+            props.get("postcode"),
+            props.get("city"),
+            props.get("state"),
+            props.get("country"),
+        ] if p
+    )
+    return _FallbackLocation(lat, lon, address or text)
+
+
+def _try_geocode(query):
+    try:
+        location = _geocode_raw(query, country_codes="it", exactly_one=True)
+        if location is not None:
+            return location
+    except Exception:
+        pass
+    return _try_geocode_photon(query)
 
 
 def geocode_address(address: str):
@@ -183,25 +251,64 @@ def search_candidates(query: str, limit: int = 5):
         )
     except Exception:
         results = None
-    if not results:
+    if results:
+        candidates = []
+        for r in results:
+            addr = (r.raw or {}).get("address", {})
+            road = addr.get("road", "")
+            house_number = addr.get("house_number", "")
+            indirizzo = f"{road} {house_number}".strip() if road else ""
+            citta = (
+                addr.get("city") or addr.get("town") or addr.get("village")
+                or addr.get("municipality") or ""
+            )
+            candidates.append({
+                "lat": r.latitude,
+                "lon": r.longitude,
+                "display_name": r.address,
+                "indirizzo": indirizzo,
+                "cap": addr.get("postcode", ""),
+                "citta": citta,
+            })
+        return candidates
+
+    # Nominatim non ha risposto (es. bloccato/limitato sull'IP condiviso di un
+    # hosting gratuito): si prova lo stesso con Photon, cosi' la ricerca non
+    # resta a mani vuote solo perche' un servizio e' irraggiungibile.
+    return _search_candidates_photon(query, limit)
+
+
+def _search_candidates_photon(query: str, limit: int):
+    try:
+        resp = requests.get(
+            "https://photon.komoot.io/api/",
+            params={"q": query, "limit": limit, "lang": "it"},
+            timeout=8,
+        )
+        resp.raise_for_status()
+        features = resp.json().get("features") or []
+    except Exception:
         return []
 
     candidates = []
-    for r in results:
-        addr = (r.raw or {}).get("address", {})
-        road = addr.get("road", "")
-        house_number = addr.get("house_number", "")
-        indirizzo = f"{road} {house_number}".strip() if road else ""
-        citta = (
-            addr.get("city") or addr.get("town") or addr.get("village")
-            or addr.get("municipality") or ""
+    for feat in features:
+        props = feat.get("properties", {})
+        if props.get("countrycode") and props["countrycode"] != "IT":
+            continue
+        lon, lat = feat["geometry"]["coordinates"]
+        indirizzo = f"{props.get('street', '')} {props.get('housenumber', '')}".strip()
+        citta = props.get("city") or props.get("town") or props.get("village") or ""
+        display_name = ", ".join(
+            p for p in [
+                indirizzo, props.get("postcode"), citta, props.get("state"), props.get("country"),
+            ] if p
         )
         candidates.append({
-            "lat": r.latitude,
-            "lon": r.longitude,
-            "display_name": r.address,
+            "lat": lat,
+            "lon": lon,
+            "display_name": display_name or query,
             "indirizzo": indirizzo,
-            "cap": addr.get("postcode", ""),
+            "cap": props.get("postcode", ""),
             "citta": citta,
         })
     return candidates
