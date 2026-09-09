@@ -24,8 +24,19 @@ LAST_MORNING_SCARICO_DEADLINE = time(12, 15)
 
 # Velocità media di riferimento (km/h) usata solo come fallback quando OSRM
 # non è raggiungibile (distanza stimata via Haversine * fattore rete stradale).
-FALLBACK_SPEED_KMH = 45.0
+FALLBACK_SPEED_KMH = 35.0
 ROAD_NETWORK_FACTOR = 1.30  # correzione Haversine -> percorso stradale reale
+
+# OSRM (il motore di instradamento gratuito usato dall'app) stima i tempi di
+# percorrenza in base ai soli limiti di velocità della strada, senza conoscere
+# semafori, stop, ZTL, code reali: per questo sottostima sistematicamente i
+# tempi effettivi, soprattutto in ambito urbano/cittadino (verificato: su una
+# tratta reale extraurbano->centro Milano, OSRM stimava 20,5 min contro i 33
+# min reali di Google Maps). Questo fattore corregge SEMPRE (a qualunque ora)
+# tutti i tempi ottenuti da OSRM, per avvicinarli alla realtà; il traffico
+# storico delle fasce orarie (TRAFFIC_BANDS) si applica poi in aggiunta, solo
+# nella fascia di punta.
+ROAD_TIME_CORRECTION_FACTOR = 1.30
 
 # Fasce orarie con traffico storico simulato: (ora_inizio, ora_fine, moltiplicatore_tempo)
 TRAFFIC_BANDS = [

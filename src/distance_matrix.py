@@ -57,7 +57,13 @@ def build_matrices(points):
         durations_s = data["durations"]
 
         dist_km = [[(d or 0) / 1000.0 for d in row] for row in distances_m]
-        dur_min = [[(d or 0) / 60.0 for d in row] for row in durations_s]
+        # OSRM stima i tempi solo dai limiti di velocità (nessun semaforo/ZTL/coda
+        # reale): si corregge sempre con ROAD_TIME_CORRECTION_FACTOR per avvicinarsi
+        # ai tempi reali; il traffico orario (fasce di punta) si applica poi a parte.
+        dur_min = [
+            [(d or 0) / 60.0 * config.ROAD_TIME_CORRECTION_FACTOR for d in row]
+            for row in durations_s
+        ]
         return dist_km, dur_min
     except Exception:
         return _fallback_matrix(points)

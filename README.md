@@ -30,8 +30,9 @@ giornalieri, senza usare API a pagamento di Google Maps.
    mattutina entro le 12:10, rientro tassativo in deposito.
 3. **Ottimizzazione**: calcola la sequenza di visita che minimizza i km, usando
    OR-Tools per una sequenza di partenza e una ricerca locale (2-opt/or-opt) che
-   valuta esattamente tutti i vincoli orari e il traffico storico simulato
-   (+20% nelle fasce 08:00-09:00 e 13:00-14:00). Se il giro non è fattibile entro
+   valuta esattamente tutti i vincoli orari, una correzione fissa dei tempi OSRM
+   (che da soli sottostimano il traffico urbano reale) e il traffico storico
+   simulato (+25% nella fascia 08:00-09:00). Se il giro non è fattibile entro
    il rientro richiesto, mostra un avviso rosso con il motivo esatto.
 4. **Link di navigazione**: genera link Google Maps pronti per Android Auto /
    CarPlay, con split automatico ogni 8 tappe (limite pratico dei link di
