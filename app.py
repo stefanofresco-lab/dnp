@@ -148,13 +148,23 @@ if uploaded_files:
 
                 if info["trovato"]:
                     # OCR riuscito: impara/aggiorna l'anagrafica per le prossime volte.
-                    clients_db.upsert_client(
-                        info["cliente"], info["indirizzo"], info["cap"],
-                        info["citta"], info["provincia"],
-                    )
+                    # Un guasto qui (es. anagrafica su GitHub non raggiungibile) NON deve
+                    # mai bloccare l'estrazione dell'indirizzo, che e' gia' riuscita.
+                    try:
+                        clients_db.upsert_client(
+                            info["cliente"], info["indirizzo"], info["cap"],
+                            info["citta"], info["provincia"],
+                        )
+                    except Exception as e:
+                        errors.append(f"{f.name}: indirizzo estratto correttamente, ma non salvato "
+                                       f"in anagrafica ({e}).")
                 else:
                     # OCR incompleto: prova a recuperare l'indirizzo dall'anagrafica clienti.
-                    match = clients_db.find_client(info["cliente"] or f.name)
+                    try:
+                        match = clients_db.find_client(info["cliente"] or f.name)
+                    except Exception as e:
+                        match = None
+                        errors.append(f"{f.name}: anagrafica clienti non raggiungibile ({e}).")
                     if match:
                         info["cliente"] = match["cliente"]
                         info["indirizzo"] = match["indirizzo"]
@@ -334,12 +344,15 @@ with st.expander("➕ Aggiungi una tappa manualmente (senza DDT)"):
                 [st.session_state.stops_df, new_row], ignore_index=True
             )
             if salva_in_anagrafica:
-                clients_db.upsert_client(
-                    st.session_state.manual_cliente, st.session_state.manual_indirizzo,
-                    st.session_state.manual_cap, st.session_state.manual_citta,
-                    st.session_state.manual_provincia, st.session_state.manual_vincolo,
-                    st.session_state.manual_coordinate,
-                )
+                try:
+                    clients_db.upsert_client(
+                        st.session_state.manual_cliente, st.session_state.manual_indirizzo,
+                        st.session_state.manual_cap, st.session_state.manual_citta,
+                        st.session_state.manual_provincia, st.session_state.manual_vincolo,
+                        st.session_state.manual_coordinate,
+                    )
+                except Exception as e:
+                    st.warning(f"Tappa aggiunta, ma non salvata in anagrafica ({e}).")
             st.success(f"Tappa '{st.session_state.manual_cliente}' aggiunta alla tabella qui sotto.")
             st.session_state["_reset_manual_form"] = True
             st.rerun()
@@ -355,11 +368,14 @@ with st.expander("🗂️ Anagrafica clienti salvati"):
             st.write("")
             st.write("")
             if st.button("🗑️ Elimina"):
-                if clients_db.delete_client(nome_da_eliminare):
-                    st.success(f"Cliente '{nome_da_eliminare}' eliminato dall'anagrafica.")
-                    st.rerun()
-                else:
-                    st.warning("Nessun cliente trovato con questo nome.")
+                try:
+                    if clients_db.delete_client(nome_da_eliminare):
+                        st.success(f"Cliente '{nome_da_eliminare}' eliminato dall'anagrafica.")
+                        st.rerun()
+                    else:
+                        st.warning("Nessun cliente trovato con questo nome.")
+                except Exception as e:
+                    st.warning(f"Impossibile eliminare il cliente ({e}).")
     else:
         st.caption(
             "Nessun cliente salvato ancora. Vengono salvati automaticamente quelli riconosciuti "
