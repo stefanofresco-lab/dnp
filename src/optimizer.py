@@ -57,7 +57,6 @@ def simulate_route(order, stops, dist_km, dur_min, start_min, return_deadline_mi
     total_km = 0.0
     schedule = []
     violations = []  # ciascuna: {"message": str, "overage_min": float}
-    morning_stops = []  # (position, service_start_min, stop_index) per le tappe servite prima di pranzo
 
     for pos, stop_i in enumerate(order):
         target_idx = stop_i + 1
@@ -134,9 +133,6 @@ def simulate_route(order, stops, dist_km, dur_min, start_min, return_deadline_mi
                 "overage_min": service_start - vincolo["orario_max"],
             })
 
-        if service_start < LUNCH_START_MIN:
-            morning_stops.append((pos, service_start, stop_i))
-
         schedule.append({
             "posizione": pos + 1,
             "cliente": stop["cliente"],
@@ -163,20 +159,6 @@ def simulate_route(order, stops, dist_km, dur_min, start_min, return_deadline_mi
                        f"tassativo delle {min_to_hhmm(return_deadline_min)}",
             "overage_min": arrival_depot - return_deadline_min,
         })
-
-    if morning_stops:
-        # L'ultimo scarico mattutino (per ordine di visita) deve iniziare entro
-        # LAST_MORNING_SCARICO_DEADLINE_MIN, non solo l'arrivo: e' l'inizio
-        # scarico che deve avvenire in tempo per chiudere prima delle 12:30.
-        _, last_service_start, last_stop_i = morning_stops[-1]
-        if last_service_start > LAST_MORNING_SCARICO_DEADLINE_MIN:
-            violations.append({
-                "message": f"Ultima consegna mattutina ({stops[last_stop_i]['cliente']}): scarico "
-                           f"previsto alle {min_to_hhmm(last_service_start)}, oltre le "
-                           f"{min_to_hhmm(LAST_MORNING_SCARICO_DEADLINE_MIN)} richieste per chiudere "
-                           f"prima della pausa pranzo",
-                "overage_min": last_service_start - LAST_MORNING_SCARICO_DEADLINE_MIN,
-            })
 
     return {
         "order": order,

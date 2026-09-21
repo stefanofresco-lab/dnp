@@ -117,10 +117,9 @@ with st.sidebar:
     )
     st.markdown("---")
     st.caption(
-        f"Regole applicate: magazzini chiusi 12:30-14:00 (si può viaggiare ma non scaricare), "
-        f"ultimo inizio scarico mattutino entro le "
-        f"{config.LAST_MORNING_SCARICO_DEADLINE.strftime('%H:%M')}, "
-        f"traffico storico {_traffic_desc}."
+        f"Regole applicate: magazzini chiusi 12:30-14:00 (si può viaggiare ma non scaricare, "
+        f"il furgone attende in loco), traffico storico {_traffic_desc}. Il rientro calcolato "
+        f"viene sempre mostrato, anche se supera l'orario limite impostato qui sopra."
     )
 
 st.subheader("1. Acquisizione ordini (DDT)")
@@ -541,13 +540,20 @@ if "last_sim" in st.session_state and st.session_state.last_sim:
 
     ore_totali = int(sim["total_time_min"] // 60)
     min_totali = int(sim["total_time_min"] % 60)
+    # Il rientro calcolato va sempre mostrato, fattibile o no: un vincolo
+    # violato (es. rientro oltre l'orario richiesto) e' un avviso da leggere
+    # INSIEME all'orario reale, non un motivo per nascondere il risultato.
     if sim["feasible"]:
         st.success(
             f"✅ Giro fattibile ({route_mode}) — rientro previsto alle {sim['arrival_depot_hhmm']} "
             f"({sim['total_km']} km totali, {ore_totali}h{min_totali:02d}m di giro)"
         )
     else:
-        st.error("❌ Giro NON fattibile con i vincoli attuali:")
+        st.warning(
+            f"⚠️ Giro calcolato ({route_mode}) — rientro previsto alle {sim['arrival_depot_hhmm']} "
+            f"({sim['total_km']} km totali, {ore_totali}h{min_totali:02d}m di giro), ma con "
+            f"{len(sim['violations'])} vincolo/i non rispettato/i:"
+        )
         for v in sim["violations"]:
             st.error(f"• {v['message']}")
 
