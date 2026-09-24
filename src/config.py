@@ -26,9 +26,6 @@ SERVICE_TIME_OPTIONS_MAX = 60
 
 LUNCH_START = time(12, 30)
 LUNCH_END = time(14, 0)
-# Ultimo orario ammesso per l'INIZIO SCARICO (non il semplice arrivo) dell'ultima
-# consegna della mattina, per garantire che si chiuda prima della pausa pranzo.
-LAST_MORNING_SCARICO_DEADLINE = time(12, 15)
 
 # Velocità media di riferimento (km/h) usata solo come fallback quando OSRM
 # non è raggiungibile (distanza stimata via Haversine * fattore rete stradale).

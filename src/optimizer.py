@@ -23,7 +23,6 @@ def _t2m(t: time) -> float:
 
 LUNCH_START_MIN = _t2m(config.LUNCH_START)
 LUNCH_END_MIN = _t2m(config.LUNCH_END)
-LAST_MORNING_SCARICO_DEADLINE_MIN = _t2m(config.LAST_MORNING_SCARICO_DEADLINE)
 TRAFFIC_BANDS_MIN = [(_t2m(a), _t2m(b), f) for a, b, f in config.TRAFFIC_BANDS]
 
 
@@ -75,10 +74,11 @@ def simulate_route(order, stops, dist_km, dur_min, start_min, return_deadline_mi
         vincolo = stop.get("vincolo") or {"tipo": "nessuno", "orario_min": None, "orario_max": None}
         tipo = vincolo.get("tipo", "nessuno")
 
-        if arrival <= LAST_MORNING_SCARICO_DEADLINE_MIN:
-            # Se si arriva entro le 12:15 lo scarico puo' iniziare subito, anche
-            # se la sua durata lo fa finire oltre le 12:30: il limite e' sempre
-            # e solo sull'ORARIO DI INIZIO, indipendentemente da quanto dura lo
+        if arrival < LUNCH_START_MIN:
+            # Si puo' consegnare fino alle 12:30 (apertura magazzino): se si
+            # arriva prima di quell'orario lo scarico parte subito, anche se la
+            # sua durata lo fa finire oltre le 12:30 — il limite e' sempre e
+            # solo sull'ORARIO DI INIZIO, indipendentemente da quanto dura lo
             # scarico di quella tappa.
             service_start = arrival
         elif arrival >= LUNCH_END_MIN:
