@@ -15,6 +15,7 @@ infrastruttura diversa da OpenStreetMap.org) prima di arrendersi."""
 import json
 import os
 import re
+import time
 
 import requests
 from geopy.geocoders import Nominatim
@@ -23,17 +24,33 @@ from geopy.extra.rate_limiter import RateLimiter
 from . import config
 
 _geolocator = Nominatim(user_agent=config.NOMINATIM_USER_AGENT, timeout=10)
-# Su hosting condivisi (es. Render) l'IP in uscita e' condiviso con tante
-# altre app: Nominatim a volte risponde "429 Too Many Requests" anche se la
-# nostra app da sola rispetta 1 richiesta/secondo. error_wait_seconds fa
-# aspettare qualche secondo in piu' prima di ritentare in quel caso, invece
-# di arrendersi subito.
-_geocode_raw = RateLimiter(
-    _geolocator.geocode, min_delay_seconds=1.1, max_retries=3, error_wait_seconds=3.0
-)
-_geocode_multi_raw = RateLimiter(
-    _geolocator.geocode, min_delay_seconds=1.1, max_retries=2, error_wait_seconds=3.0
-)
+# Photon (komoot.io) blocca con 403 le richieste che non hanno uno User-Agent
+# "da browser": lo User-Agent di default della libreria requests
+# ("python-requests/x.x") viene rifiutato sempre, silenziosamente.
+_PHOTON_HEADERS = {"User-Agent": config.NOMINATIM_USER_AGENT}
+# UN SOLO tentativo per query: quando Nominatim e' bloccato (429) ritentare non
+# serve a nulla (il blocco non si libera in pochi secondi), e ogni ritentativo
+# in piu', moltiplicato per le varie query della cascata di geocode_stop,
+# rendeva l'app lentissima ("sembra bloccata" anche se poi finiva). Meglio
+# fallire subito e passare a Photon (vedi sotto).
+_geocode_raw = RateLimiter(_geolocator.geocode, min_delay_seconds=1.1, max_retries=1)
+_geocode_multi_raw = RateLimiter(_geolocator.geocode, min_delay_seconds=1.1, max_retries=1)
+
+# Circuit breaker: appena Nominatim fallisce una volta (es. 429 sull'IP
+# condiviso di Render), si salta del tutto per un paio di minuti e si va
+# dritti su Photon per ogni richiesta successiva — invece di ritentare
+# Nominatim (e aspettare che fallisca di nuovo) per ogni singolo indirizzo.
+_NOMINATIM_COOLDOWN_SEC = 120
+_nominatim_blocked_until = 0.0
+
+
+def _nominatim_available() -> bool:
+    return time.monotonic() >= _nominatim_blocked_until
+
+
+def _mark_nominatim_blocked():
+    global _nominatim_blocked_until
+    _nominatim_blocked_until = time.monotonic() + _NOMINATIM_COOLDOWN_SEC
 
 _CIVICO_RE = re.compile(r"\s*,?\s*\d+\s*\w{0,3}\s*$")
 # Abbreviazioni puntate tipo "G." in "Via G. Carducci": Nominatim spesso non le
@@ -94,7 +111,12 @@ def _try_geocode_photon(query):
     try:
         resp = requests.get(
             "https://photon.komoot.io/api/",
-            params={"q": text, "limit": 1, "lang": "it"},
+            # "lang" NON deve essere "it": Photon supporta solo default/de/en/fr
+            # per questo parametro (un valore non supportato fa fallire SEMPRE
+            # la richiesta) — "default" restituisce comunque i nomi italiani
+            # per indirizzi in Italia, nessuna traduzione necessaria.
+            params={"q": text, "limit": 1},
+            headers=_PHOTON_HEADERS,
             timeout=8,
         )
         resp.raise_for_status()
@@ -121,12 +143,13 @@ def _try_geocode_photon(query):
 
 
 def _try_geocode(query):
-    try:
-        location = _geocode_raw(query, country_codes="it", exactly_one=True)
-        if location is not None:
-            return location
-    except Exception:
-        pass
+    if _nominatim_available():
+        try:
+            location = _geocode_raw(query, country_codes="it", exactly_one=True)
+            if location is not None:
+                return location
+        except Exception:
+            _mark_nominatim_blocked()
     return _try_geocode_photon(query)
 
 
@@ -245,12 +268,15 @@ def search_candidates(query: str, limit: int = 5):
     query = (query or "").strip()
     if not query:
         return []
-    try:
-        results = _geocode_multi_raw(
-            query, country_codes="it", exactly_one=False, limit=limit, addressdetails=True
-        )
-    except Exception:
-        results = None
+    results = None
+    if _nominatim_available():
+        try:
+            results = _geocode_multi_raw(
+                query, country_codes="it", exactly_one=False, limit=limit, addressdetails=True
+            )
+        except Exception:
+            _mark_nominatim_blocked()
+            results = None
     if results:
         candidates = []
         for r in results:
@@ -282,7 +308,8 @@ def _search_candidates_photon(query: str, limit: int):
     try:
         resp = requests.get(
             "https://photon.komoot.io/api/",
-            params={"q": query, "limit": limit, "lang": "it"},
+            params={"q": query, "limit": limit},
+            headers=_PHOTON_HEADERS,
             timeout=8,
         )
         resp.raise_for_status()
