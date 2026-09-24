@@ -10,7 +10,14 @@ def _coord_str(lat, lon):
 
 def _build_link(origin, destination, waypoints):
     url = "https://www.google.com/maps/dir/?api=1"
-    url += f"&origin={_coord_str(*origin)}"
+    if origin is not None:
+        # Se origin e' None si OMETTE il parametro: Google Maps usa la posizione
+        # GPS attuale come punto di partenza, invece di un punto fisso col nome
+        #/indirizzo del deposito. Il furgone parte comunque fisicamente da li',
+        # quindi il risultato e' lo stesso, ma il deposito non compare come una
+        # "tappa" numerata nell'interfaccia di Google Maps: la prima tappa vista
+        # dall'autista e' subito la prima vera consegna.
+        url += f"&origin={_coord_str(*origin)}"
     url += f"&destination={_coord_str(*destination)}"
     if waypoints:
         wp_str = "|".join(_coord_str(*w) for w in waypoints)
@@ -34,16 +41,20 @@ def build_navigation_links(depot_coord, ordered_stop_coords):
     if n <= max_per_link:
         links.append({
             "label": "Giro completo",
-            "url": _build_link(depot_coord, depot_coord, ordered_stop_coords),
+            # origin=None: si parte dalla posizione GPS attuale (il furgone e'
+            # comunque al deposito quando avvia la navigazione), non da un punto
+            # "deposito" mostrato come tappa numerata da Google Maps.
+            "url": _build_link(None, depot_coord, ordered_stop_coords),
             "tappe": list(range(1, n + 1)),
         })
         return links
 
     # split in gruppi: ogni link copre al massimo max_per_link tappe.
-    # Il link N parte dall'ultima tappa del link N-1 (o dal deposito per il primo)
-    # e termina sulla ultima tappa del gruppo; l'ultimo link rientra al deposito.
+    # Il link N parte dall'ultima tappa del link N-1 (o dalla posizione GPS
+    # attuale per il primo) e termina sulla ultima tappa del gruppo; l'ultimo
+    # link rientra al deposito.
     idx = 0
-    origin = depot_coord
+    origin = None
     link_num = 1
     while idx < n:
         group = ordered_stop_coords[idx: idx + max_per_link]
