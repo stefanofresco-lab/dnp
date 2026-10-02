@@ -122,14 +122,22 @@ def build_matrices(points):
     if n < 2:
         return [[0.0]], [[0.0]]
 
+    # Log esplicito della fonte usata: visibile nei log del server, utile per
+    # verificare che TomTom sia davvero raggiunto (e non un fallback silenzioso
+    # su OSRM senza che nessuno se ne accorga).
     tomtom_key = _get_tomtom_key()
     if tomtom_key:
         try:
-            return _tomtom_matrix(points, tomtom_key)
-        except Exception:
-            pass  # si prosegue con OSRM
+            result = _tomtom_matrix(points, tomtom_key)
+            print(f"[distance_matrix] fonte usata: TomTom ({n} punti)")
+            return result
+        except Exception as e:
+            print(f"[distance_matrix] TomTom fallito ({e}), provo OSRM")
 
     try:
-        return _osrm_matrix(points)
-    except Exception:
+        result = _osrm_matrix(points)
+        print(f"[distance_matrix] fonte usata: OSRM ({n} punti)")
+        return result
+    except Exception as e:
+        print(f"[distance_matrix] OSRM fallito ({e}), uso stima Haversine")
         return _fallback_matrix(points)
