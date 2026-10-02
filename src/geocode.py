@@ -153,6 +153,49 @@ def _try_geocode(query):
     return _try_geocode_photon(query)
 
 
+def _try_geocode_many(query, limit=5):
+    """Come _try_geocode ma ritorna FINO A `limit` candidati invece del solo
+    primo: Nominatim a volte piazza al primo posto un indirizzo omonimo nel
+    comune/frazione sbagliato (es. "Via San Bovio 1" esiste sia a Peschiera
+    Borromeo sia a Segrate) — serve poter scegliere tra piu' risultati invece
+    di accettare ciecamente il primo. Non solleva mai eccezioni."""
+    if _nominatim_available():
+        try:
+            results = _geocode_multi_raw(query, country_codes="it", exactly_one=False, limit=limit)
+            if results:
+                return list(results)
+        except Exception:
+            _mark_nominatim_blocked()
+    loc = _try_geocode_photon(query)
+    return [loc] if loc else []
+
+
+def _best_candidate(locations, cap, citta):
+    """Tra piu' candidati per la stessa query, sceglie quello piu' coerente
+    con CAP/citta' richiesti. La citta' e' un segnale piu' affidabile del CAP
+    (nei dati OSM il CAP di una frazione/quartiere puo' differire da quello
+    ufficiale del comune, mentre il nome del comune e' quasi sempre corretto),
+    quindi si prova prima un match su entrambi, poi solo sulla citta', poi
+    solo sul CAP, prima di arrendersi."""
+    if not locations:
+        return None
+    if not cap and not citta:
+        return locations[0]
+    for loc in locations:
+        addr = loc.address or ""
+        if (not cap or cap in addr) and (not citta or citta.lower() in addr.lower()):
+            return loc
+    if citta:
+        for loc in locations:
+            if citta.lower() in (loc.address or "").lower():
+                return loc
+    if cap:
+        for loc in locations:
+            if cap in (loc.address or ""):
+                return loc
+    return None
+
+
 def geocode_address(address: str):
     """Geocodifica una singola stringa indirizzo gia' formattata (usato per il
     deposito). Ritorna (lat, lon, display_name) oppure (None, None, None)."""
@@ -238,24 +281,22 @@ def geocode_stop(indirizzo: str, cap: str, citta: str, provincia: str = ""):
 
     location = None
     precisione = None
-    fallback_location = None  # miglior risultato trovato ma col CAP sbagliato
+    fallback_location = None  # miglior risultato trovato ma in comune/CAP sbagliato
     for candidate, livello in candidates:
-        loc = _try_geocode(candidate)
-        if loc is None:
+        locs = _try_geocode_many(candidate)
+        if not locs:
             continue
-        if cap and cap not in (loc.address or ""):
-            # Il risultato NON e' nel CAP richiesto: molto probabilmente una via
-            # omonima in un comune/frazione diverso (es. "Via Verbano" esiste
-            # sia a Novara 28100 sia a Dagnente/Arona 28041) — non si accetta
-            # subito, si prova prima un candidato piu' specifico della cascata.
-            # Si tiene da parte come ultima spiaggia, ma declassato a "bassa"
-            # precisione, cosi' l'utente lo vede segnalato invece che sbagliato
-            # in silenzio.
-            if fallback_location is None:
-                fallback_location = loc
-            continue
-        location, precisione = loc, livello
-        break
+        best = _best_candidate(locs, cap, citta)
+        if best is not None:
+            location, precisione = best, livello
+            break
+        # Nessuno dei candidati di questa query e' nel comune/CAP richiesto
+        # (es. "Via San Bovio 1" trovata solo a Peschiera Borromeo invece che
+        # a Segrate): non si accetta subito, si prova prima una query piu'
+        # specifica/diversa della cascata. Si tiene da parte il primo come
+        # ultima spiaggia, ma declassato a precisione "bassa".
+        if fallback_location is None:
+            fallback_location = locs[0]
 
     if location is None:
         location, precisione = fallback_location, "bassa"
