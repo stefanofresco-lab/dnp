@@ -238,11 +238,27 @@ def geocode_stop(indirizzo: str, cap: str, citta: str, provincia: str = ""):
 
     location = None
     precisione = None
+    fallback_location = None  # miglior risultato trovato ma col CAP sbagliato
     for candidate, livello in candidates:
-        location = _try_geocode(candidate)
-        if location is not None:
-            precisione = livello
-            break
+        loc = _try_geocode(candidate)
+        if loc is None:
+            continue
+        if cap and cap not in (loc.address or ""):
+            # Il risultato NON e' nel CAP richiesto: molto probabilmente una via
+            # omonima in un comune/frazione diverso (es. "Via Verbano" esiste
+            # sia a Novara 28100 sia a Dagnente/Arona 28041) — non si accetta
+            # subito, si prova prima un candidato piu' specifico della cascata.
+            # Si tiene da parte come ultima spiaggia, ma declassato a "bassa"
+            # precisione, cosi' l'utente lo vede segnalato invece che sbagliato
+            # in silenzio.
+            if fallback_location is None:
+                fallback_location = loc
+            continue
+        location, precisione = loc, livello
+        break
+
+    if location is None:
+        location, precisione = fallback_location, "bassa"
 
     if location is None:
         return None, None, None, None
