@@ -409,8 +409,10 @@ with st.expander("❓ Guida: come scrivere il campo Vincolo"):
 | *(vuoto)* / `{config.CONSTRAINT_NONE}` | Nessun vincolo, l'algoritmo decide tutto in automatico |
 | `{config.CONSTRAINT_MORNING}` | Consegna tassativamente prima delle 12:30 |
 | `{config.CONSTRAINT_AFTERNOON}` | Consegna dopo le 14:00 (se il furgone arriva prima, attende) |
-| `Entro le 10:30` | Orario limite tassativo: la consegna deve avvenire entro quell'ora |
-| `Tra le 8:30 e le 9:00` | Finestra oraria: se il furgone arriva prima, attende in loco fino alle 8:30 |
+| `Entro le 10:30` | Orario limite tassativo: la consegna deve avvenire **entro** quell'ora, oltre è una violazione |
+| `Alle 13:30` | Orario della consegna: se il furgone arriva prima attende in loco fino alle 13:30, ma **non è un limite massimo** — arrivare dopo non è una violazione |
+| `Dalle 13:30` | Come sopra: va bene **da** quell'ora in poi, nessun limite massimo |
+| `Tra le 8:30 e le 9:00` | Finestra oraria: se il furgone arriva prima, attende in loco fino alle 8:30; oltre le 9:00 è una violazione |
 | `Ultima Consegna` | Forza questa tappa come **ultima** del giro (es. per liberare per ultimo un magazzino) |
 | `Penultima Consegna` / `Terzultima Consegna` | Forza la posizione a partire dal fondo del giro |
 | `Prima Consegna`, `Seconda Consegna`, ... `Ottava Consegna` | Forza la posizione assoluta corrispondente (1ª, 2ª, ... 8ª) nel giro |

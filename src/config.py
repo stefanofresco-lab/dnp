@@ -120,7 +120,16 @@ def parse_vincolo(value) -> dict:
         lo, hi = sorted(times[:2])
         return {**_VINCOLO_EMPTY, "tipo": "finestra", "orario_min": lo, "orario_max": hi}
     if len(times) == 1:
-        return {**_VINCOLO_EMPTY, "tipo": "deadline", "orario_min": times[0]}
+        if "entro" in v:
+            # Scadenza tassativa: la consegna DEVE avvenire entro quell'ora,
+            # oltre e' una violazione.
+            return {**_VINCOLO_EMPTY, "tipo": "deadline", "orario_min": times[0]}
+        # "Alle X" / "Dalle X" / un orario scritto da solo senza "entro" NON
+        # significa una scadenza: "alle" indica l'orario di consegna, "dalle"
+        # indica che va bene da quell'ora in poi. In entrambi i casi il
+        # furgone aspetta in loco se arriva prima, ma non e' mai "in ritardo"
+        # se arriva dopo (nessun limite massimo, a differenza di "entro").
+        return {**_VINCOLO_EMPTY, "tipo": "finestra", "orario_min": times[0], "orario_max": None}
     if "mattin" in v:
         return {**_VINCOLO_EMPTY, "tipo": "mattina"}
     if "pomerig" in v:
@@ -141,9 +150,12 @@ def describe_vincolo(vincolo: dict) -> str:
         return f"Entro le {(m // 60) % 24:02d}:{m % 60:02d}"
     if tipo == "finestra":
         lo = int(vincolo.get("orario_min") or 0)
-        hi = int(vincolo.get("orario_max") or 0)
-        return (f"Tra le {(lo // 60) % 24:02d}:{lo % 60:02d} e le "
-                f"{(hi // 60) % 24:02d}:{hi % 60:02d}")
+        lo_str = f"{(lo // 60) % 24:02d}:{lo % 60:02d}"
+        hi = vincolo.get("orario_max")
+        if hi is None:
+            return f"Dalle {lo_str}"
+        hi = int(hi)
+        return f"Tra le {lo_str} e le {(hi // 60) % 24:02d}:{hi % 60:02d}"
     if tipo == "posizione":
         if vincolo.get("posizione_assoluta") is not None:
             return f"Posizione {vincolo['posizione_assoluta']} nel giro"
